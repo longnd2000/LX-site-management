@@ -15,10 +15,10 @@ export function useProducts({ userId, selectedSite, searchText, currentPage, pag
   const queryClient = useQueryClient();
 
   // 1. Query danh sách sản phẩm từ Next.js API (Proxy tới WP API)
-  const { data: { products = [], total = 0 } = {}, isLoading, isFetching, error } = useQuery<{ products: Product[]; total: number }>({
+  const { data: { products = [], total = 0, hasWooCommerce = true } = {}, isLoading, isFetching, error } = useQuery<{ products: Product[]; total: number; hasWooCommerce: boolean }>({
     queryKey: ['products', userId, selectedSite, currentPage, pageSize],
     queryFn: async () => {
-      if (!userId || !selectedSite) return { products: [], total: 0 };
+      if (!userId || !selectedSite) return { products: [], total: 0, hasWooCommerce: true };
 
       try {
         const res = await axios.get('/api/sites/products', {
@@ -41,6 +41,7 @@ export function useProducts({ userId, selectedSite, searchText, currentPage, pag
           return {
             products: fetchedProducts,
             total: res.data.total_posts || 0,
+            hasWooCommerce: res.data.hasWooCommerce !== undefined ? res.data.hasWooCommerce : true,
           };
         }
         
@@ -77,5 +78,6 @@ export function useProducts({ userId, selectedSite, searchText, currentPage, pag
     error,
     isSyncingAll: isFetching,
     syncAll: refreshManual,
+    hasWooCommerce,
   };
 }

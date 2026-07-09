@@ -80,6 +80,18 @@ export async function GET(req: NextRequest) {
       per_page: perPage
     });
   } catch (error: any) {
+    if (error.message && error.message.includes('không cài đặt WooCommerce')) {
+      return NextResponse.json({
+        success: true,
+        products: [],
+        total_posts: 0,
+        total_pages: 0,
+        current_page: page,
+        per_page: perPage,
+        hasWooCommerce: false
+      });
+    }
+
     return NextResponse.json(
       { success: false, message: error.message || 'Đã xảy ra lỗi khi lấy dữ liệu sản phẩm.' },
       { status: 500 }

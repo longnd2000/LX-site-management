@@ -8,7 +8,8 @@ import {
   SearchOutlined,
   EyeOutlined,
   ExportOutlined,
-  EditOutlined
+  EditOutlined,
+  PlusOutlined
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/services/supabase';
@@ -36,6 +37,7 @@ export default function ProductsManagement() {
   
   // State theo dõi sản phẩm đang chuẩn bị đăng nhập nhanh (SSO) để chỉnh sửa
   const [ssoLoadingId, setSsoLoadingId] = useState<string | null>(null);
+  const [ssoCreateLoading, setSsoCreateLoading] = useState(false);
 
   // 1. Fetch danh sách Sites để hiển thị trong Select Filter
   const { data: sites = [] } = useQuery<Pick<Site, 'id' | 'name'>[]>({
@@ -61,6 +63,7 @@ export default function ProductsManagement() {
     error,
     syncAll,
     isSyncingAll,
+    hasWooCommerce,
   } = useProducts({
     userId: user?.id,
     selectedSite,
@@ -76,8 +79,36 @@ export default function ProductsManagement() {
     }
   }, [sites, selectedSite]);
 
+  // Hàm tạo cửa sổ chờ với UI loading mượt mà thay vì tab trắng
+  const createLoadingWindow = () => {
+    const newWindow = window.open('', '_blank');
+    if (newWindow) {
+      newWindow.document.write(`
+        <html lang="vi">
+          <head>
+            <title>Đang kết nối an toàn...</title>
+            <meta charset="utf-8">
+            <style>
+              body { margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background-color: #0f172a; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; }
+              .spinner { width: 40px; height: 40px; border: 4px solid rgba(255, 255, 255, 0.1); border-left-color: #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px; }
+              @keyframes spin { to { transform: rotate(360deg); } }
+            </style>
+          </head>
+          <body>
+            <div class="spinner"></div>
+            <h3>Đang tự động đăng nhập...</h3>
+            <p style="color: #94a3b8; font-size: 14px;">Vui lòng đợi trong giây lát</p>
+          </body>
+        </html>
+      `);
+      newWindow.document.close();
+    }
+    return newWindow;
+  };
+
   // Hàm xử lý SSO tự động đăng nhập nhanh vào site vệ tinh và dẫn thẳng tới giao diện Edit bài viết (Sản phẩm là custom post type)
   const handleSSOEdit = async (record: Product) => {
+    const newWindow = createLoadingWindow();
     setSsoLoadingId(record.id);
     try {
       const redirectPath = `post.php?post=${record.wp_post_id}&action=edit`;
@@ -88,16 +119,50 @@ export default function ProductsManagement() {
         }
       });
       
-      if (res.data && res.data.ssoUrl) {
-        window.open(res.data.ssoUrl, '_blank');
+      if (res.data && res.data.ssoUrl && newWindow) {
+        newWindow.location.href = res.data.ssoUrl;
       } else {
+        if (newWindow) newWindow.close();
         message.error('Không thể tạo liên kết đăng nhập tự động.');
       }
     } catch (err: any) {
-      console.error('Lỗi SSO:', err);
+      if (newWindow) newWindow.close();
+      console.error('Lỗi SSO:', err.message);
       message.error(err.response?.data?.error || err.message || 'Lỗi kết nối đăng nhập tự động.');
     } finally {
       setSsoLoadingId(null);
+    }
+  };
+
+  const handleSSOCreateProduct = async () => {
+    if (!selectedSite) {
+      message.warning('Vui lòng chọn một website trước khi tạo sản phẩm.');
+      return;
+    }
+    const newWindow = createLoadingWindow();
+    setSsoCreateLoading(true);
+    try {
+      // URL để tạo sản phẩm mới trong WooCommerce là post-new.php?post_type=product
+      const redirectPath = `post-new.php?post_type=product`;
+      const res = await axios.get('/api/sites/sso', {
+        params: {
+          siteId: selectedSite,
+          redirect: redirectPath,
+        }
+      });
+      
+      if (res.data && res.data.ssoUrl && newWindow) {
+        newWindow.location.href = res.data.ssoUrl;
+      } else {
+        if (newWindow) newWindow.close();
+        message.error('Không thể tạo liên kết đăng nhập tự động.');
+      }
+    } catch (err: any) {
+      if (newWindow) newWindow.close();
+      console.error('Lỗi SSO:', err.message);
+      message.error(err.response?.data?.error || err.message || 'Lỗi kết nối đăng nhập tự động.');
+    } finally {
+      setSsoCreateLoading(false);
     }
   };
 
@@ -228,16 +293,30 @@ export default function ProductsManagement() {
             Quản lý và tra cứu toàn bộ sản phẩm từ các site vệ tinh. Tổng số: <strong className="text-blue-400">{total}</strong> sản phẩm.
           </Paragraph>
         </div>
-        <Button
-          type="primary"
-          icon={<SyncOutlined />}
-          loading={isSyncingAll}
-          disabled={!selectedSite}
-          className="bg-blue-600 border-none h-10"
-          onClick={() => syncAll()}
-        >
-          Làm mới trang hiện tại
-        </Button>
+        <Space>
+          {hasWooCommerce && (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              loading={ssoCreateLoading}
+              disabled={!selectedSite}
+              className="bg-green-600 hover:bg-green-500 border-none h-10"
+              onClick={handleSSOCreateProduct}
+            >
+              Tạo sản phẩm mới
+            </Button>
+          )}
+          <Button
+            type="primary"
+            icon={<SyncOutlined />}
+            loading={isSyncingAll}
+            disabled={!selectedSite}
+            className="bg-blue-600 border-none h-10"
+            onClick={() => syncAll()}
+          >
+            Làm mới trang hiện tại
+          </Button>
+        </Space>
       </div>
 
       {/* Filter Card */}
@@ -281,29 +360,39 @@ export default function ProductsManagement() {
 
       {/* Table Card */}
       <Card variant="borderless" className="shadow-lg border border-slate-800/80 bg-slate-900/40 backdrop-blur-sm">
-        <Table
-          columns={columns}
-          dataSource={products}
-          rowKey="id"
-          loading={isLoading}
-          locale={{ 
-            emptyText: error ? (
-              <div className="text-red-400 p-4">{(error as Error).message}</div>
-            ) : (
-              <span className="text-slate-500">Chưa có sản phẩm nào.</span>
-            )
-          }}
-          pagination={{
-            current: currentPage,
-            pageSize: pageSize,
-            total: total,
-            showSizeChanger: true,
-            onChange: (page, size) => {
-              setCurrentPage(page);
-              setPageSize(size);
-            },
-          }}
-        />
+        {!hasWooCommerce ? (
+          <div className="py-12 text-center text-slate-400">
+            <ShoppingOutlined className="text-4xl text-slate-600 mb-4 block" />
+            <div className="text-lg font-medium text-slate-300">Không có sản phẩm nào</div>
+            <div>Trang web vệ tinh này không cài đặt plugin WooCommerce.</div>
+          </div>
+        ) : (
+          <Table
+            columns={columns}
+            dataSource={products}
+            rowKey="id"
+            loading={isLoading}
+            locale={{ 
+              emptyText: error ? (
+                <div className="text-red-400 p-4">{(error as Error).message}</div>
+              ) : (
+                <span className="text-slate-500">Chưa có sản phẩm nào.</span>
+              )
+            }}
+            pagination={{
+              current: currentPage,
+              pageSize: pageSize,
+              total: total,
+              showSizeChanger: true,
+              onChange: (page, size) => {
+                setCurrentPage(page);
+                setPageSize(size);
+              },
+            }}
+            scroll={{ x: 1200 }}
+            className="custom-table"
+          />
+        )}
       </Card>
 
       {/* Drawer xem nhanh chi tiết sản phẩm */}
