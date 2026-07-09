@@ -9,7 +9,8 @@ import {
   GlobalOutlined,
   EyeOutlined,
   ExportOutlined,
-  EditOutlined
+  EditOutlined,
+  PlusOutlined
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/services/supabase';
@@ -37,6 +38,7 @@ export default function PostsManagement() {
   
   // State theo dõi bài viết đang chuẩn bị đăng nhập nhanh (SSO) để chỉnh sửa
   const [ssoLoadingId, setSsoLoadingId] = useState<string | null>(null);
+  const [ssoCreateLoading, setSsoCreateLoading] = useState(false);
 
   // 1. Fetch danh sách Sites để hiển thị trong Select Filter (Sử dụng trực tiếp trong component hoặc có thể tách)
   const { data: sites = [] } = useQuery<Pick<Site, 'id' | 'name'>[]>({
@@ -75,8 +77,40 @@ export default function PostsManagement() {
       setSelectedSite(sites[0].id);
     }
   }, [sites, selectedSite]);
+
+  // Hàm tạo cửa sổ chờ với UI loading mượt mà thay vì tab trắng
+  const createLoadingWindow = () => {
+    const newWindow = window.open('', '_blank');
+    if (newWindow) {
+      newWindow.document.write(`
+        <html lang="vi">
+          <head>
+            <title>Đang kết nối an toàn...</title>
+            <meta charset="utf-8">
+            <style>
+              body { margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background-color: #0f172a; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; }
+              .spinner { width: 40px; height: 40px; border: 4px solid rgba(255, 255, 255, 0.1); border-left-color: #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px; }
+              @keyframes spin { to { transform: rotate(360deg); } }
+              h2 { font-weight: 500; font-size: 1.25rem; margin: 0; letter-spacing: 0.5px; }
+              p { color: #94a3b8; font-size: 0.875rem; margin-top: 8px; }
+            </style>
+          </head>
+          <body>
+            <div class="spinner"></div>
+            <h2>Đang thiết lập kết nối an toàn...</h2>
+            <p>Vui lòng đợi trong giây lát để tự động đăng nhập vào website.</p>
+          </body>
+        </html>
+      `);
+      newWindow.document.close();
+    }
+    return newWindow;
+  };
+
   // Hàm xử lý SSO tự động đăng nhập nhanh vào site vệ tinh và dẫn thẳng tới giao diện Edit bài viết
   const handleSSOEdit = async (record: Post) => {
+    // Mở tab mới với giao diện chờ
+    const newWindow = createLoadingWindow();
     setSsoLoadingId(record.id);
     try {
       const redirectPath = `post.php?post=${record.wp_post_id}&action=edit`;
@@ -87,16 +121,50 @@ export default function PostsManagement() {
         }
       });
       
-      if (res.data && res.data.ssoUrl) {
-        window.open(res.data.ssoUrl, '_blank');
+      if (res.data && res.data.ssoUrl && newWindow) {
+        newWindow.location.href = res.data.ssoUrl;
       } else {
+        if (newWindow) newWindow.close();
         message.error('Không thể tạo liên kết đăng nhập tự động.');
       }
     } catch (err: any) {
-      console.error('Lỗi SSO:', err);
+      if (newWindow) newWindow.close();
+      console.error('Lỗi SSO:', err.message);
       message.error(err.response?.data?.error || err.message || 'Lỗi kết nối đăng nhập tự động.');
     } finally {
       setSsoLoadingId(null);
+    }
+  };
+
+  const handleSSOCreatePost = async () => {
+    if (!selectedSite) {
+      message.warning('Vui lòng chọn một website trước khi tạo bài viết.');
+      return;
+    }
+    // Mở tab mới với giao diện chờ
+    const newWindow = createLoadingWindow();
+    setSsoCreateLoading(true);
+    try {
+      const redirectPath = `post-new.php`;
+      const res = await axios.get('/api/sites/sso', {
+        params: {
+          siteId: selectedSite,
+          redirect: redirectPath,
+        }
+      });
+      
+      if (res.data && res.data.ssoUrl && newWindow) {
+        newWindow.location.href = res.data.ssoUrl;
+      } else {
+        if (newWindow) newWindow.close();
+        message.error('Không thể tạo liên kết đăng nhập tự động.');
+      }
+    } catch (err: any) {
+      if (newWindow) newWindow.close();
+      console.error('Lỗi SSO:', err.message);
+      message.error(err.response?.data?.error || err.message || 'Lỗi kết nối đăng nhập tự động.');
+    } finally {
+      setSsoCreateLoading(false);
     }
   };
 
@@ -198,16 +266,28 @@ export default function PostsManagement() {
             Quản lý và tra cứu toàn bộ bài viết từ các site vệ tinh. Tổng số: <strong className="text-blue-400">{total}</strong> bài viết.
           </Paragraph>
         </div>
-        <Button
-          type="primary"
-          icon={<SyncOutlined />}
-          loading={isSyncingAll}
-          disabled={!selectedSite}
-          className="bg-blue-600 border-none h-10"
-          onClick={() => syncAll()}
-        >
-          Làm mới trang hiện tại
-        </Button>
+        <Space>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            loading={ssoCreateLoading}
+            disabled={!selectedSite}
+            className="bg-emerald-600 hover:!bg-emerald-500 border-none h-10"
+            onClick={handleSSOCreatePost}
+          >
+            Tạo bài viết mới
+          </Button>
+          <Button
+            type="primary"
+            icon={<SyncOutlined />}
+            loading={isSyncingAll}
+            disabled={!selectedSite}
+            className="bg-blue-600 hover:!bg-blue-500 border-none h-10"
+            onClick={() => syncAll()}
+          >
+            Làm mới
+          </Button>
+        </Space>
       </div>
 
       {/* Filter Card */}
