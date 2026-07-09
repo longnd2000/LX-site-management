@@ -27,8 +27,8 @@ class LX_Site_Management_Plugin {
     }
 
     private function __construct() {
-        // Tự động sinh API Key ngẫu nhiên khi kích hoạt plugin (phục vụ fallback)
-        register_activation_hook(__FILE__, array($this, 'activate_plugin'));
+        // Tự động sinh API Key ngẫu nhiên nếu chưa có (Tương thích khi copy vào functions.php)
+        add_action('init', array($this, 'activate_plugin'));
 
         // Đăng ký các REST API routes
         add_action('rest_api_init', array($this, 'register_rest_routes'));
@@ -47,6 +47,10 @@ class LX_Site_Management_Plugin {
         add_action('wp_ajax_nopriv_lx_get_posts', array($this, 'ajax_get_posts'));
         add_action('wp_ajax_lx_get_posts', array($this, 'ajax_get_posts'));
 
+        // Đăng ký AJAX endpoint cho việc lấy sản phẩm
+        add_action('wp_ajax_nopriv_lx_get_products', array($this, 'ajax_get_products'));
+        add_action('wp_ajax_lx_get_products', array($this, 'ajax_get_products'));
+
         // Đăng ký AJAX endpoint sinh Login Token dùng 1 lần phục vụ SSO (Next.js backend gọi sang)
         add_action('wp_ajax_nopriv_lx_generate_login_token', array($this, 'ajax_generate_login_token'));
         add_action('wp_ajax_lx_generate_login_token', array($this, 'ajax_generate_login_token'));
@@ -54,6 +58,10 @@ class LX_Site_Management_Plugin {
         // Đăng ký AJAX endpoint đăng nhập nhanh tự động (Trình duyệt người dùng redirect tới)
         add_action('wp_ajax_nopriv_lx_quick_login', array($this, 'ajax_quick_login'));
         add_action('wp_ajax_lx_quick_login', array($this, 'ajax_quick_login'));
+
+        // Đăng ký AJAX endpoint kiểm tra kết nối bằng API Key
+        add_action('wp_ajax_nopriv_lx_verify', array($this, 'ajax_verify'));
+        add_action('wp_ajax_lx_verify', array($this, 'ajax_verify'));
 
         // Lắng nghe luồng SSO qua trang chủ (bypass hoàn toàn mọi cơ chế chặn admin-ajax.php / wp-admin)
         add_action('init', array($this, 'handle_home_sso'));
@@ -101,6 +109,13 @@ class LX_Site_Management_Plugin {
         register_rest_route('lx-site-management/v1', '/posts', array(
             'methods'             => WP_REST_Server::READABLE,
             'callback'            => array($this, 'api_get_posts'),
+            'permission_callback' => array($this, 'validate_api_key'),
+        ));
+
+        // Endpoint 4: Lấy sản phẩm vệ tinh (cho luồng Pull)
+        register_rest_route('lx-site-management/v1', '/products', array(
+            'methods'             => WP_REST_Server::READABLE,
+            'callback'            => array($this, 'api_get_products'),
             'permission_callback' => array($this, 'validate_api_key'),
         ));
     }
@@ -226,6 +241,30 @@ class LX_Site_Management_Plugin {
     }
 
     /**
+     * AJAX Callback: Xác thực trạng thái kết nối bằng API Key
+     */
+    public function ajax_verify() {
+        $api_key_header = isset($_SERVER['HTTP_X_LX_API_KEY']) ? $_SERVER['HTTP_X_LX_API_KEY'] : '';
+        $api_key_param = isset($_REQUEST['api_key']) ? $_REQUEST['api_key'] : '';
+        $provided_key = !empty($api_key_header) ? $api_key_header : $api_key_param;
+        $saved_key = get_option($this->option_api_key_name);
+
+        if (empty($saved_key)) {
+            wp_send_json_error(array('message' => 'Hệ thống chưa thiết lập API Key.'), 500);
+        }
+
+        if (empty($provided_key) || !hash_equals($saved_key, $provided_key)) {
+            wp_send_json_error(array('message' => 'API Key không chính xác hoặc đã hết hạn.'), 403);
+        }
+
+        wp_send_json_success(array(
+            'site_name' => get_bloginfo('name'),
+            'site_url'  => site_url(),
+            'version'   => '1.1.0'
+        ), 200);
+    }
+
+    /**
      * API Callback: Lấy danh sách bài viết
      */
     public function api_get_posts(WP_REST_Request $request) {
@@ -250,14 +289,16 @@ class LX_Site_Management_Plugin {
                 global $post;
                 
                 $posts[] = array(
-                    'wp_post_id'    => $post->ID,
-                    'title'         => get_the_title(),
-                    'excerpt'       => get_the_excerpt(),
-                    'content'       => get_the_content(),
-                    'url'           => get_permalink(),
-                    'author_name'   => get_the_author_meta('display_name', $post->post_author),
-                    'published_at'  => get_post_datetime($post, 'date', 'gmt') ? get_post_datetime($post, 'date', 'gmt')->format('Y-m-d H:i:s') : $post->post_date_gmt,
-                    'status'        => 'publish'
+                    'wp_post_id'              => $post->ID,
+                    'title'                   => get_the_title(),
+                    'excerpt'                 => get_the_excerpt(),
+                    'content'                 => get_the_content(),
+                    'url'                     => get_permalink(),
+                    'author_name'             => get_the_author_meta('display_name', $post->post_author),
+                    'published_at'            => get_post_datetime($post, 'date', 'gmt') ? get_post_datetime($post, 'date', 'gmt')->format('Y-m-d H:i:s') : $post->post_date_gmt,
+                    'status'                  => 'publish',
+                    'yoast_seo_score'         => get_post_meta($post->ID, '_yoast_wpseo_linkdex', true) ?: '',
+                    'yoast_readability_score' => get_post_meta($post->ID, '_yoast_wpseo_content_score', true) ?: ''
                 );
             }
             wp_reset_postdata();
@@ -457,14 +498,16 @@ class LX_Site_Management_Plugin {
                 global $post;
                 
                 $posts[] = array(
-                    'wp_post_id'    => $post->ID,
-                    'title'         => get_the_title(),
-                    'excerpt'       => get_the_excerpt(),
-                    'content'       => get_the_content(),
-                    'url'           => get_permalink(),
-                    'author_name'   => get_the_author_meta('display_name', $post->post_author),
-                    'published_at'  => get_post_datetime($post, 'date', 'gmt') ? get_post_datetime($post, 'date', 'gmt')->format('Y-m-d H:i:s') : $post->post_date_gmt,
-                    'status'        => 'publish'
+                    'wp_post_id'              => $post->ID,
+                    'title'                   => get_the_title(),
+                    'excerpt'                 => get_the_excerpt(),
+                    'content'                 => get_the_content(),
+                    'url'                     => get_permalink(),
+                    'author_name'             => get_the_author_meta('display_name', $post->post_author),
+                    'published_at'            => get_post_datetime($post, 'date', 'gmt') ? get_post_datetime($post, 'date', 'gmt')->format('Y-m-d H:i:s') : $post->post_date_gmt,
+                    'status'                  => 'publish',
+                    'yoast_seo_score'         => get_post_meta($post->ID, '_yoast_wpseo_linkdex', true) ?: '',
+                    'yoast_readability_score' => get_post_meta($post->ID, '_yoast_wpseo_content_score', true) ?: ''
                 );
             }
             wp_reset_postdata();
@@ -624,6 +667,157 @@ class LX_Site_Management_Plugin {
             wp_safe_redirect($redirect_url);
             exit;
         }
+    }
+
+    /**
+     * API Callback: Lấy danh sách sản phẩm (cho luồng Pull REST API)
+     */
+    public function api_get_products(WP_REST_Request $request) {
+        if (!class_exists('WooCommerce')) {
+            return new WP_REST_Response(array('success' => false, 'message' => 'Trang web vệ tinh không cài đặt WooCommerce (Không bán sản phẩm).'), 400);
+        }
+
+        $page = $request->get_param('page') ? intval($request->get_param('page')) : 1;
+        $per_page = $request->get_param('per_page') ? intval($request->get_param('per_page')) : 10;
+        
+        $args = array(
+            'post_type'      => 'product',
+            'post_status'    => 'publish',
+            'posts_per_page' => $per_page,
+            'paged'          => $page,
+            'orderby'        => 'date',
+            'order'          => 'DESC'
+        );
+
+        $query = new WP_Query($args);
+        $products = array();
+
+        if ($query->have_posts()) {
+            while ($query->have_posts()) {
+                $query->the_post();
+                global $post;
+                
+                // Get WooCommerce product if active
+                $product_obj = function_exists('wc_get_product') ? wc_get_product($post->ID) : null;
+                $price = $product_obj ? $product_obj->get_price() : get_post_meta($post->ID, '_price', true);
+                $regular_price = $product_obj ? $product_obj->get_regular_price() : get_post_meta($post->ID, '_regular_price', true);
+                $stock_status = $product_obj ? $product_obj->get_stock_status() : get_post_meta($post->ID, '_stock_status', true);
+
+                $products[] = array(
+                    'wp_post_id'              => $post->ID,
+                    'title'                   => get_the_title(),
+                    'excerpt'                 => get_the_excerpt(),
+                    'content'                 => get_the_content(),
+                    'url'                     => get_permalink(),
+                    'author_name'             => get_the_author_meta('display_name', $post->post_author),
+                    'published_at'            => get_post_datetime($post, 'date', 'gmt') ? get_post_datetime($post, 'date', 'gmt')->format('Y-m-d H:i:s') : $post->post_date_gmt,
+                    'status'                  => 'publish',
+                    'price'                   => $price,
+                    'regular_price'           => $regular_price,
+                    'stock_status'            => $stock_status,
+                    'yoast_seo_score'         => get_post_meta($post->ID, '_yoast_wpseo_linkdex', true) ?: '',
+                    'yoast_readability_score' => get_post_meta($post->ID, '_yoast_wpseo_content_score', true) ?: ''
+                );
+            }
+            wp_reset_postdata();
+        }
+
+        $total_posts = $query->found_posts;
+        $max_pages = $query->max_num_pages;
+
+        $response = new WP_REST_Response(array(
+            'success'      => true,
+            'posts'        => $products, // keep field name posts for consistency in wrapper
+            'total_posts'  => $total_posts,
+            'total_pages'  => $max_pages,
+            'current_page' => $page,
+            'per_page'     => $per_page
+        ), 200);
+
+        $response->header('X-WP-Total', $total_posts);
+        $response->header('X-WP-TotalPages', $max_pages);
+
+        return $response;
+    }
+
+    /**
+     * AJAX Callback: Lấy danh sách sản phẩm (Bypass bảo mật REST API)
+     */
+    public function ajax_get_products() {
+        // 1. Xác thực API Key
+        $api_key_header = isset($_SERVER['HTTP_X_LX_API_KEY']) ? $_SERVER['HTTP_X_LX_API_KEY'] : '';
+        $api_key_param = isset($_REQUEST['api_key']) ? $_REQUEST['api_key'] : '';
+        $provided_key = !empty($api_key_header) ? $api_key_header : $api_key_param;
+        $saved_key = get_option($this->option_api_key_name);
+
+        if (empty($saved_key)) {
+            wp_send_json_error(array('message' => 'Hệ thống website vệ tinh chưa thiết lập API Key.'), 500);
+        }
+
+        if (empty($provided_key) || !hash_equals($saved_key, $provided_key)) {
+            wp_send_json_error(array('message' => 'API Key không chính xác hoặc đã hết hạn.'), 403);
+        }
+
+        if (!class_exists('WooCommerce')) {
+            wp_send_json_error(array('message' => 'Trang web vệ tinh không cài đặt WooCommerce (Không bán sản phẩm).'), 400);
+        }
+
+        // 2. Lấy tham số phân trang
+        $page = isset($_REQUEST['page']) ? intval($_REQUEST['page']) : 1;
+        $per_page = isset($_REQUEST['per_page']) ? intval($_REQUEST['per_page']) : 10;
+
+        $args = array(
+            'post_type'      => 'product',
+            'post_status'    => 'publish',
+            'posts_per_page' => $per_page,
+            'paged'          => $page,
+            'orderby'        => 'date',
+            'order'          => 'DESC'
+        );
+
+        $query = new WP_Query($args);
+        $products = array();
+
+        if ($query->have_posts()) {
+            while ($query->have_posts()) {
+                $query->the_post();
+                global $post;
+                
+                // Get WooCommerce product if active
+                $product_obj = function_exists('wc_get_product') ? wc_get_product($post->ID) : null;
+                $price = $product_obj ? $product_obj->get_price() : get_post_meta($post->ID, '_price', true);
+                $regular_price = $product_obj ? $product_obj->get_regular_price() : get_post_meta($post->ID, '_regular_price', true);
+                $stock_status = $product_obj ? $product_obj->get_stock_status() : get_post_meta($post->ID, '_stock_status', true);
+
+                $products[] = array(
+                    'wp_post_id'              => $post->ID,
+                    'title'                   => get_the_title(),
+                    'excerpt'                 => get_the_excerpt(),
+                    'content'                 => get_the_content(),
+                    'url'                     => get_permalink(),
+                    'author_name'             => get_the_author_meta('display_name', $post->post_author),
+                    'published_at'            => get_post_datetime($post, 'date', 'gmt') ? get_post_datetime($post, 'date', 'gmt')->format('Y-m-d H:i:s') : $post->post_date_gmt,
+                    'status'                  => 'publish',
+                    'price'                   => $price,
+                    'regular_price'           => $regular_price,
+                    'stock_status'            => $stock_status,
+                    'yoast_seo_score'         => get_post_meta($post->ID, '_yoast_wpseo_linkdex', true) ?: '',
+                    'yoast_readability_score' => get_post_meta($post->ID, '_yoast_wpseo_content_score', true) ?: ''
+                );
+            }
+            wp_reset_postdata();
+        }
+
+        $total_posts = $query->found_posts;
+        $max_pages = $query->max_num_pages;
+
+        wp_send_json_success(array(
+            'posts'        => $products, // keep field name posts for consistency
+            'total_posts'  => $total_posts,
+            'total_pages'  => $max_pages,
+            'current_page' => $page,
+            'per_page'     => $per_page
+        ), 200);
     }
 }
 

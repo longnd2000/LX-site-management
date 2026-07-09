@@ -27,6 +27,14 @@ export interface Post {
   };
 }
 
+export interface Product extends Post {
+  price?: string | number;
+  regular_price?: string | number;
+  stock_status?: string;
+  yoast_seo_score?: string | number;
+  yoast_readability_score?: string | number;
+}
+
 export interface SyncResponse {
   success: boolean;
   message: string;

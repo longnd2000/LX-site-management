@@ -153,15 +153,6 @@ export default function SitesManagement() {
               onClick={() => testConnection(record)}
             />
           </Tooltip>
-          
-          <Button
-            type="dashed"
-            icon={<SyncOutlined />}
-            loading={isSyncing && syncVariables === record.id}
-            onClick={() => syncSite(record.id)}
-          >
-            Làm mới
-          </Button>
 
           <Popconfirm
             title="Xóa kết nối website?"
@@ -197,7 +188,7 @@ export default function SitesManagement() {
         </Button>
       </div>
 
-      <Card bordered={false} className="shadow-lg border border-slate-800/80 bg-slate-900/40 backdrop-blur-sm">
+      <Card variant="borderless" className="shadow-lg border border-slate-800/80 bg-slate-900/40 backdrop-blur-sm">
         <Table
           columns={columns}
           dataSource={sites}

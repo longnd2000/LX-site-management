@@ -3,10 +3,9 @@
 import React, { useState } from 'react';
 import { Table, Select, Input, Card, Button, Typography, Space, Tag, Drawer, message, Row, Col, Tooltip } from 'antd';
 import {
-  FileTextOutlined,
+  ShoppingOutlined,
   SyncOutlined,
   SearchOutlined,
-  GlobalOutlined,
   EyeOutlined,
   ExportOutlined,
   EditOutlined
@@ -15,14 +14,14 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/services/supabase';
 import { useSelector } from 'react-redux';
 import { RootState } from '@/store';
-import { Post, Site } from '@/types';
-import { usePosts } from '@/hooks/usePosts';
+import { Product, Site } from '@/types';
+import { useProducts } from '@/hooks/useProducts';
 import axios from 'axios';
 
 const { Title, Paragraph } = Typography;
 const { Option } = Select;
 
-export default function PostsManagement() {
+export default function ProductsManagement() {
   const { user } = useSelector((state: RootState) => state.auth);
   
   // State bộ lọc và phân trang
@@ -31,14 +30,14 @@ export default function PostsManagement() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   
-  // State cho xem nhanh bài viết
-  const [selectedPost, setSelectedPost] = useState<Post | null>(null);
+  // State cho xem nhanh sản phẩm
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   
-  // State theo dõi bài viết đang chuẩn bị đăng nhập nhanh (SSO) để chỉnh sửa
+  // State theo dõi sản phẩm đang chuẩn bị đăng nhập nhanh (SSO) để chỉnh sửa
   const [ssoLoadingId, setSsoLoadingId] = useState<string | null>(null);
 
-  // 1. Fetch danh sách Sites để hiển thị trong Select Filter (Sử dụng trực tiếp trong component hoặc có thể tách)
+  // 1. Fetch danh sách Sites để hiển thị trong Select Filter
   const { data: sites = [] } = useQuery<Pick<Site, 'id' | 'name'>[]>({
     queryKey: ['sitesFilter', user?.id],
     queryFn: async () => {
@@ -54,14 +53,15 @@ export default function PostsManagement() {
     enabled: !!user?.id,
   });
 
-  // 2. Sử dụng custom hook usePosts để lấy danh sách bài viết và mutation đồng bộ
+  // 2. Sử dụng custom hook useProducts
   const {
-    posts,
+    products,
     total,
     isLoading,
+    error,
     syncAll,
     isSyncingAll,
-  } = usePosts({
+  } = useProducts({
     userId: user?.id,
     selectedSite,
     searchText,
@@ -75,8 +75,9 @@ export default function PostsManagement() {
       setSelectedSite(sites[0].id);
     }
   }, [sites, selectedSite]);
-  // Hàm xử lý SSO tự động đăng nhập nhanh vào site vệ tinh và dẫn thẳng tới giao diện Edit bài viết
-  const handleSSOEdit = async (record: Post) => {
+
+  // Hàm xử lý SSO tự động đăng nhập nhanh vào site vệ tinh và dẫn thẳng tới giao diện Edit bài viết (Sản phẩm là custom post type)
+  const handleSSOEdit = async (record: Product) => {
     setSsoLoadingId(record.id);
     try {
       const redirectPath = `post.php?post=${record.wp_post_id}&action=edit`;
@@ -111,10 +112,10 @@ export default function PostsManagement() {
       },
     },
     {
-      title: 'Tiêu đề bài viết',
+      title: 'Tên sản phẩm',
       dataIndex: 'title',
       key: 'title',
-      render: (text: string, record: Post) => (
+      render: (text: string, record: Product) => (
         <div>
           <span className="font-semibold text-slate-200 line-clamp-1">{text}</span>
           <p className="text-xs text-slate-400 m-0 line-clamp-1">
@@ -123,27 +124,50 @@ export default function PostsManagement() {
         </div>
       ),
     },
-
     {
-      title: 'Tác giả',
-      dataIndex: 'author_name',
-      key: 'author',
-      render: (text: string) => text || 'Ẩn danh',
+      title: 'Giá',
+      key: 'price',
+      align: 'right' as const,
+      render: (_: any, record: Product) => {
+        if (!record.price && !record.regular_price) return <span className="text-slate-500">-</span>;
+        
+        return (
+          <div className="flex flex-col items-end">
+            {record.price ? (
+              <span className="text-blue-400 font-medium">
+                {Number(record.price).toLocaleString('vi-VN')} ₫
+              </span>
+            ) : null}
+            {record.regular_price && record.regular_price !== record.price ? (
+              <span className="text-slate-500 text-xs line-through">
+                {Number(record.regular_price).toLocaleString('vi-VN')} ₫
+              </span>
+            ) : null}
+          </div>
+        );
+      },
     },
     {
-      title: 'Ngày đăng',
-      dataIndex: 'published_at',
-      key: 'published_at',
-      render: (date: string) => new Date(date).toLocaleString('vi-VN'),
+      title: 'Kho hàng',
+      dataIndex: 'stock_status',
+      key: 'stock_status',
+      align: 'center' as const,
+      render: (status: string) => {
+        if (!status) return <span className="text-slate-500">-</span>;
+        if (status === 'instock') return <Tag color="green">Còn hàng</Tag>;
+        if (status === 'outofstock') return <Tag color="red">Hết hàng</Tag>;
+        if (status === 'onbackorder') return <Tag color="orange">Cho đặt trước</Tag>;
+        return <Tag color="default">{status}</Tag>;
+      },
     },
     {
       title: 'Điểm SEO',
       key: 'seo_score',
       align: 'center' as const,
-      render: (_: any, record: any) => {
+      render: (_: any, record: Product) => {
         const score = record.yoast_seo_score;
         if (!score) return <span className="text-slate-500">-</span>;
-        const num = parseInt(score, 10);
+        const num = typeof score === 'string' ? parseInt(score, 10) : score;
         let color = 'default';
         if (num >= 71) color = 'green';
         else if (num >= 41) color = 'orange';
@@ -152,22 +176,28 @@ export default function PostsManagement() {
       },
     },
     {
+      title: 'Ngày đăng',
+      dataIndex: 'published_at',
+      key: 'published_at',
+      render: (date: string) => new Date(date).toLocaleString('vi-VN'),
+    },
+    {
       title: 'Thao tác',
       key: 'actions',
-      render: (_: any, record: Post) => (
+      render: (_: any, record: Product) => (
         <Space size="middle">
           <Tooltip title="Xem nhanh nội dung">
             <Button
               type="text"
               icon={<EyeOutlined className="text-slate-300 hover:text-blue-400" />}
               onClick={() => {
-                setSelectedPost(record);
+                setSelectedProduct(record);
                 setIsDrawerOpen(true);
               }}
             />
           </Tooltip>
 
-          <Tooltip title="Xem bài viết thực tế (mở tab mới)">
+          <Tooltip title="Xem sản phẩm thực tế (mở tab mới)">
             <a href={record.url} target="_blank" rel="noopener noreferrer">
               <Button
                 type="text"
@@ -176,7 +206,7 @@ export default function PostsManagement() {
             </a>
           </Tooltip>
 
-          <Tooltip title="Đăng nhập tự động & Sửa bài trên WordPress">
+          <Tooltip title="Đăng nhập tự động & Sửa sản phẩm trên WordPress">
             <Button
               type="text"
               icon={<EditOutlined className="text-amber-500 hover:text-amber-600" />}
@@ -193,9 +223,9 @@ export default function PostsManagement() {
     <div className="space-y-6">
       <div className="flex justify-between items-center flex-wrap gap-4">
         <div>
-          <Title level={3} className="!m-0"><FileTextOutlined className="text-blue-500 mr-2" />Tổng hợp bài viết</Title>
+          <Title level={3} className="!m-0"><ShoppingOutlined className="text-blue-500 mr-2" />Tổng hợp sản phẩm</Title>
           <Paragraph className="text-slate-500 !m-0">
-            Quản lý và tra cứu toàn bộ bài viết từ các site vệ tinh. Tổng số: <strong className="text-blue-400">{total}</strong> bài viết.
+            Quản lý và tra cứu toàn bộ sản phẩm từ các site vệ tinh. Tổng số: <strong className="text-blue-400">{total}</strong> sản phẩm.
           </Paragraph>
         </div>
         <Button
@@ -233,9 +263,9 @@ export default function PostsManagement() {
             </Select>
           </Col>
           <Col xs={24} sm={12} md={16}>
-            <div className="text-xs text-slate-400 font-medium mb-1.5">Tìm kiếm bài viết</div>
+            <div className="text-xs text-slate-400 font-medium mb-1.5">Tìm kiếm sản phẩm</div>
             <Input
-              placeholder="Nhập tiêu đề bài viết cần tìm..."
+              placeholder="Nhập tên sản phẩm cần tìm..."
               prefix={<SearchOutlined className="text-slate-400" />}
               size="large"
               allowClear
@@ -253,10 +283,16 @@ export default function PostsManagement() {
       <Card variant="borderless" className="shadow-lg border border-slate-800/80 bg-slate-900/40 backdrop-blur-sm">
         <Table
           columns={columns}
-          dataSource={posts}
+          dataSource={products}
           rowKey="id"
           loading={isLoading}
-          locale={{ emptyText: <span className="text-slate-500">Chưa có bài viết nào.</span> }}
+          locale={{ 
+            emptyText: error ? (
+              <div className="text-red-400 p-4">{(error as Error).message}</div>
+            ) : (
+              <span className="text-slate-500">Chưa có sản phẩm nào.</span>
+            )
+          }}
           pagination={{
             current: currentPage,
             pageSize: pageSize,
@@ -270,15 +306,14 @@ export default function PostsManagement() {
         />
       </Card>
 
-      {/* Drawer xem nhanh chi tiết bài viết */}
+      {/* Drawer xem nhanh chi tiết sản phẩm */}
       <Drawer
         title={
           <div className="flex flex-col gap-1 pr-8">
-            <span className="text-lg font-bold text-white line-clamp-2">{selectedPost?.title}</span>
+            <span className="text-lg font-bold text-white line-clamp-2">{selectedProduct?.title}</span>
             <div className="flex items-center gap-2">
-              <Tag color="blue">{selectedPost?.sites?.name}</Tag>
               <span className="text-xs text-slate-400">
-                Tác giả: {selectedPost?.author_name || 'Ẩn danh'} | Đăng lúc: {selectedPost?.published_at ? new Date(selectedPost.published_at).toLocaleString('vi-VN') : ''}
+                Đăng lúc: {selectedProduct?.published_at ? new Date(selectedProduct.published_at).toLocaleString('vi-VN') : ''}
               </span>
             </div>
           </div>
@@ -287,34 +322,34 @@ export default function PostsManagement() {
         size="large"
         onClose={() => {
           setIsDrawerOpen(false);
-          setSelectedPost(null);
+          setSelectedProduct(null);
         }}
         open={isDrawerOpen}
         extra={
-          <a href={selectedPost?.url} target="_blank" rel="noopener noreferrer">
+          <a href={selectedProduct?.url} target="_blank" rel="noopener noreferrer">
             <Button type="primary" icon={<ExportOutlined />} className="bg-blue-600 border-none">
               Xem trang gốc
             </Button>
           </a>
         }
       >
-        {selectedPost && (
+        {selectedProduct && (
           <div className="space-y-6 prose prose-invert max-w-none">
-            {selectedPost.excerpt && (
+            {selectedProduct.excerpt && (
               <div className="p-4 bg-slate-950/60 border-l-4 border-blue-500 rounded-r-xl">
                 <span className="text-xs font-semibold text-blue-400 block mb-1 uppercase tracking-wide">Mô tả ngắn:</span>
                 <div 
                   className="text-slate-300 italic text-sm"
-                  dangerouslySetInnerHTML={{ __html: selectedPost.excerpt }}
+                  dangerouslySetInnerHTML={{ __html: selectedProduct.excerpt }}
                 />
               </div>
             )}
             
             <div>
-              <span className="text-xs font-semibold text-slate-400 block mb-3 uppercase tracking-wide">Nội dung bài viết:</span>
+              <span className="text-xs font-semibold text-slate-400 block mb-3 uppercase tracking-wide">Nội dung sản phẩm:</span>
               <div 
                 className="text-slate-200 leading-relaxed font-sans"
-                dangerouslySetInnerHTML={{ __html: selectedPost.content || 'Không có nội dung.' }}
+                dangerouslySetInnerHTML={{ __html: selectedProduct.content || 'Không có nội dung.' }}
               />
             </div>
           </div>

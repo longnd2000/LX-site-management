@@ -11,6 +11,7 @@ import {
   MenuFoldOutlined,
   UserOutlined,
   CloudServerOutlined,
+  ShoppingOutlined,
 } from '@ant-design/icons';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSelector } from 'react-redux';
@@ -68,6 +69,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       key: '/dashboard/posts',
       icon: <FileTextOutlined />,
       label: <Link href="/dashboard/posts">Tổng hợp bài viết</Link>,
+    },
+    {
+      key: '/dashboard/products',
+      icon: <ShoppingOutlined />,
+      label: <Link href="/dashboard/products">Quản lý Sản phẩm</Link>,
     },
   ];
 

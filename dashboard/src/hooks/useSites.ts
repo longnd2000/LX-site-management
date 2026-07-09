@@ -91,7 +91,7 @@ export function useSites(userId?: string) {
   // 4. Mutation kiểm tra kết nối bằng API Key
   const testConnectionMutation = useMutation({
     mutationFn: async (record: Site) => {
-      const res = await axios.post('/api/sites/verify', {
+      const res = await axios.post('/api/sites/test-connection', {
         url: record.url,
         apiKey: record.api_key,
       });
