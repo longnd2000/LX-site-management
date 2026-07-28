@@ -72,9 +72,10 @@ export function useProducts({ userId, selectedSite, searchText, currentPage, pag
   };
 
   return {
-    products,
+    products: isFetching && !products.length ? [] : products,
     total,
     isLoading,
+    isFetching,
     error,
     isSyncingAll: isFetching,
     syncAll: refreshManual,

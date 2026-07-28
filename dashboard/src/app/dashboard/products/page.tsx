@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Table, Select, Input, Card, Button, Typography, Space, Tag, Drawer, message, Row, Col, Tooltip } from 'antd';
+import { Table, Select, Input, Card, Button, Typography, Space, Tag, Drawer, message, Row, Col, Tooltip, Spin, Skeleton, Alert } from 'antd';
 import {
   ShoppingOutlined,
   SyncOutlined,
@@ -40,7 +40,7 @@ export default function ProductsManagement() {
   const [ssoCreateLoading, setSsoCreateLoading] = useState(false);
 
   // 1. Fetch danh sách Sites để hiển thị trong Select Filter
-  const { data: sites = [] } = useQuery<Pick<Site, 'id' | 'name'>[]>({
+  const { data: sites = [], isLoading: isSitesLoading } = useQuery<Pick<Site, 'id' | 'name'>[]>({
     queryKey: ['sitesFilter', user?.id],
     queryFn: async () => {
       if (!user?.id) return [];
@@ -60,6 +60,7 @@ export default function ProductsManagement() {
     products,
     total,
     isLoading,
+    isFetching,
     error,
     syncAll,
     isSyncingAll,
@@ -71,6 +72,9 @@ export default function ProductsManagement() {
     currentPage,
     pageSize,
   });
+
+  // Tổng hợp trạng thái loading: nếu đang tải sites, chưa chọn site, đang gọi API lấy sản phẩm hoặc đang sync -> Bật Loading Effect
+  const isDataLoading = isSitesLoading || !selectedSite || isLoading || isFetching || isSyncingAll;
 
   // Tự động chọn Site đầu tiên trong danh sách nếu chưa chọn site nào
   React.useEffect(() => {
@@ -360,38 +364,48 @@ export default function ProductsManagement() {
 
       {/* Table Card */}
       <Card variant="borderless" className="shadow-lg border border-slate-800/80 bg-slate-900/40 backdrop-blur-sm">
-        {!hasWooCommerce ? (
+        {!hasWooCommerce && !isDataLoading ? (
           <div className="py-12 text-center text-slate-400">
             <ShoppingOutlined className="text-4xl text-slate-600 mb-4 block" />
             <div className="text-lg font-medium text-slate-300">Không có sản phẩm nào</div>
             <div>Trang web vệ tinh này không cài đặt plugin WooCommerce.</div>
           </div>
         ) : (
-          <Table
-            columns={columns}
-            dataSource={products}
-            rowKey="id"
-            loading={isLoading}
-            locale={{ 
-              emptyText: error ? (
-                <div className="text-red-400 p-4">{(error as Error).message}</div>
-              ) : (
-                <span className="text-slate-500">Chưa có sản phẩm nào.</span>
-              )
-            }}
-            pagination={{
-              current: currentPage,
-              pageSize: pageSize,
-              total: total,
-              showSizeChanger: true,
-              onChange: (page, size) => {
-                setCurrentPage(page);
-                setPageSize(size);
-              },
-            }}
-            scroll={{ x: 1200 }}
-            className="custom-table"
-          />
+          <Spin 
+            spinning={isDataLoading} 
+            tip={<span className="text-blue-400 font-medium mt-2 block">Đang kết nối API và đồng bộ mốc giá sản phẩm mới nhất từ website...</span>}
+            size="large"
+          >
+            <Table
+              columns={columns}
+              dataSource={isDataLoading ? [] : products}
+              rowKey="id"
+              loading={isDataLoading}
+              locale={{ 
+                emptyText: isDataLoading ? (
+                  <div className="py-12 text-slate-400">
+                    <Spin size="small" className="mr-2" /> Đang tải mốc giá & sản phẩm mới nhất...
+                  </div>
+                ) : error ? (
+                  <div className="text-red-400 p-4">{(error as Error).message}</div>
+                ) : (
+                  <span className="text-slate-500">Chưa có sản phẩm nào.</span>
+                )
+              }}
+              pagination={{
+                current: currentPage,
+                pageSize: pageSize,
+                total: total,
+                showSizeChanger: true,
+                onChange: (page, size) => {
+                  setCurrentPage(page);
+                  setPageSize(size);
+                },
+              }}
+              scroll={{ x: 1200 }}
+              className="custom-table"
+            />
+          </Spin>
         )}
       </Card>
 
